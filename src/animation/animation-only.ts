@@ -142,6 +142,16 @@ function vectorStepKeys(times: number[], axisCurves: IFBXAnimationOnlyAxisCurves
   })
 }
 
+function alignedAxisTimes(axisCurves: IFBXAnimationOnlyAxisCurves): number[] | null {
+  const { x, y, z } = axisCurves
+  if (!x || !y || !z) return null
+  if (x.times.length !== y.times.length || x.times.length !== z.times.length) return null
+  for (let i = 0; i < x.times.length; i++) {
+    if (!sameTime(x.times[i]!, y.times[i]!) || !sameTime(x.times[i]!, z.times[i]!)) return null
+  }
+  return x.times
+}
+
 function finalRotationQuaternionFromVector(rotation: Vector3): Quaternion {
   return Quaternion.Inverse(
     Quaternion.RotationAxis(Vector3.Left(), rotation.x)
@@ -150,10 +160,11 @@ function finalRotationQuaternionFromVector(rotation: Vector3): Quaternion {
   ).normalize()
 }
 
-function finalRotationQuaternion(rotation: Vector3, model: IFBXAnimationOnlyModel): Quaternion {
+function finalRotationQuaternion(rotation: Vector3, model: IFBXAnimationOnlyModel, rightHanded = false): Quaternion {
   let q = finalRotationQuaternionFromVector(rotation)
   if (model.preRotation) q = finalRotationQuaternionFromVector(model.preRotation).multiply(q)
   if (model.postRotation) q = q.multiply(Quaternion.Inverse(finalRotationQuaternionFromVector(model.postRotation)))
+  if (rightHanded) q = new Quaternion(q.x, -q.y, -q.z, q.w)
   return q.normalize()
 }
 
@@ -168,7 +179,7 @@ function unrollQuaternion(value: Quaternion, previous: Quaternion | null): Quate
   return value
 }
 
-function rotationKeys(times: number[], axisCurves: IFBXAnimationOnlyAxisCurves, model: IFBXAnimationOnlyModel): Array<{ frame: number; value: Quaternion }> {
+function rotationKeys(times: number[], axisCurves: IFBXAnimationOnlyAxisCurves, model: IFBXAnimationOnlyModel, rightHanded = false): Array<{ frame: number; value: Quaternion }> {
   const previousDegrees = new Vector3(model.lclRotation.x * 180 / Math.PI, model.lclRotation.y * 180 / Math.PI, model.lclRotation.z * 180 / Math.PI)
   let previousQuaternion: Quaternion | null = null
   return times.map((time) => {
@@ -182,7 +193,7 @@ function rotationKeys(times: number[], axisCurves: IFBXAnimationOnlyAxisCurves, 
       previousDegrees.x * Math.PI / 180,
       previousDegrees.y * Math.PI / 180,
       previousDegrees.z * Math.PI / 180,
-    ), model), previousQuaternion)
+    ), model, rightHanded), previousQuaternion)
     previousQuaternion = value
     return { frame: animationFrameAt(time), value }
   })
@@ -194,6 +205,7 @@ function addAnimationForTarget(
   model: IFBXAnimationOnlyModel,
   axisCurves: IFBXAnimationOnlyAxisCurves,
   target: TransformNode,
+  rightHanded = false,
 ): boolean {
   const times = unionTimes(axisCurves)
   if (!times.length) return false
@@ -204,8 +216,9 @@ function addAnimationForTarget(
     return true
   }
   if (relationship !== 'Lcl Rotation') return false
+  const rotationTimes = alignedAxisTimes(axisCurves) ?? times
   const animation = new Animation(`${model.name}.rotationQuaternion`, 'rotationQuaternion', FBX_ANIMATION_FRAME_RATE, Animation.ANIMATIONTYPE_QUATERNION, Animation.ANIMATIONLOOPMODE_CYCLE)
-  animation.setKeys(rotationKeys(times, axisCurves, model))
+  animation.setKeys(rotationKeys(rotationTimes, axisCurves, model, rightHanded))
   group.addTargetedAnimation(animation, target)
   return true
 }
@@ -230,7 +243,7 @@ export function ImportAnimationOnly(runtime: IFBXLoaderRuntime, groupName = 'fbx
     const node = new TransformNode(model.name, runtime.scene, true)
     node.id = model.id.toString()
     node.position.copyFrom(model.lclTranslation)
-    node.rotationQuaternion = finalRotationQuaternion(model.lclRotation, model)
+    node.rotationQuaternion = finalRotationQuaternion(model.lclRotation, model, runtime.scene.useRightHandedSystem)
     runtime.cachedModels[model.id] = node
     runtime.result.transformNodes.push(node)
     nodes.set(model.id, node)
@@ -251,7 +264,7 @@ export function ImportAnimationOnly(runtime: IFBXLoaderRuntime, groupName = 'fbx
     const target = runtime.cachedModels[parent.id]
     const axisCurves = curvesByNode.get(curveNodeId)
     if (!model || !(target instanceof TransformNode) || !axisCurves) continue
-    if (addAnimationForTarget(group, parent.relationship, model, axisCurves, target)) added++
+    if (addAnimationForTarget(group, parent.relationship, model, axisCurves, target, runtime.scene.useRightHandedSystem)) added++
   }
 
   if (added === 0) {
