@@ -16,6 +16,7 @@ import { FBXGeometry, IFBXGeometryResult } from './mesh/geometry'
 
 import { FBXMaterial } from './material/material'
 import { FBXAnimations } from './animation/animations'
+import { ImportAnimationOnly } from './animation/animation-only'
 import { FBXSkeleton, IFBXSkeleton } from './mesh/skeleton'
 
 import { FBXConnections, IFBXConnections } from './connections'
@@ -262,6 +263,11 @@ export class FBXFileLoader implements ISceneLoaderPluginAsync {
 
     // Parse animation groups
     FBXAnimations.ParseAnimationGroups(runtime)
+    const baseAnimationTargets = result.animationGroups.reduce((sum, group) => sum + group.targetedAnimations.length, 0)
+    const shouldTryAnimationOnly = baseAnimationTargets === 0 || (result.meshes.length === 0 && result.skeletons.length === 0)
+    if (shouldTryAnimationOnly) {
+      ImportAnimationOnly(runtime, `${fileName ?? 'fbx'}_animation_only`)
+    }
 
     scene._blockEntityCollection = false
     return result
