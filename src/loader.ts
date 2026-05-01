@@ -266,6 +266,10 @@ export class FBXFileLoader implements ISceneLoaderPluginAsync {
     const baseAnimationTargets = result.animationGroups.reduce((sum, group) => sum + group.targetedAnimations.length, 0)
     const shouldTryAnimationOnly = baseAnimationTargets === 0 || (result.meshes.length === 0 && result.skeletons.length === 0)
     if (shouldTryAnimationOnly) {
+      if (baseAnimationTargets > 0 && result.meshes.length === 0 && result.skeletons.length === 0) {
+        result.animationGroups.forEach((group) => group.dispose())
+        result.animationGroups.length = 0
+      }
       ImportAnimationOnly(runtime, `${fileName ?? 'fbx'}_animation_only`)
     }
 
